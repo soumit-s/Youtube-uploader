@@ -28,6 +28,7 @@ const { oauth2 } = require('googleapis/build/src/apis/oauth2');
 const client = require('./clients')
 const db = require('./db');
 const TransactionModel = require('./models/TransactionModel');
+const VidModel = require('./models/VidModel');
 
 
 // //mongoDb connection with MongoDb atlas
@@ -131,6 +132,7 @@ app.get("/", async (req, res) => {
             email: data.email,
             picture: data.picture,
             token: token.access_token,
+            user_type: 'consumer',
           });
 
           model.save()
@@ -241,6 +243,48 @@ app.post('/upload/:id', upload.single('video'), (req, res) => {
       }
     })
 
+})
+
+app.get('/profile/:id/txn/create', (req, res) => {
+  const uid = req.params.id
+  db.fetchUserData(uid)
+    .then(user => {
+      res.render('create/transaction/index', {user})
+    })
+    .catch(err => res.redirect('404/usernotfound/' + uid))
+})
+
+app.post('/profile/:id/txn/create', upload.single('video'), (req, res) => {
+  const {path} = req.file
+  db.fetchUserData(req.params.id)
+  .then(user => {
+    const model = new VidModel({
+      path
+    })
+    model.save()
+      .then((doc) => {
+        new TransactionModel({
+          name: req.body.name,
+          description: req.body.description,
+          consumer: user._id,
+          consumer_vid: doc._id,
+        })
+        .save()
+        .then(doc => {
+          console.log(doc, user)
+          user.transactions
+            .push(doc._id)
+          
+          user.save()
+            .then(() => {
+              res.redirect(`/profile/${req.params.id}`)
+            })
+            .catch(err => res.status(500).send('1. failed ' + err.toString()))
+        })
+        .catch(err => res.status(500).send('2. failed ' + err.toString()))
+      })
+      .catch(err => res.status(500).send("3. failed " + err.toString()))
+  })
 })
 
 app.get('404/usernotfound/:id', (req, res) => {
