@@ -1,13 +1,12 @@
 const express = require('express');
-const app = express();
+const { v2: cloudinary } = require('cloudinary')
 const ejs = require('ejs');
 //for google auth
-const dotenv = require('dotenv').config();
+require('dotenv').config();
 const passport = require('passport');
 const session = require('express-session');
 const path = require('path');
 //require('./conf/passport')(passport); //Need to change the path
-// var MongoClient = require('mongodb').MongoClient;  
 
 //yoUTUBE API
 const auth = require('./auth');
@@ -18,7 +17,7 @@ var tags = [];
 const multer = require('multer');
 const fs = require('fs');
 
-const port = process.env.PORT || 3000;
+
 const mongoose = require('mongoose');
 const UserModel = require('./models/users');
 const ConsumerModel = require('./models/ConsumerModel')
@@ -31,12 +30,7 @@ const TransactionModel = require('./models/TransactionModel');
 const VidModel = require('./models/VidModel');
 
 
-// //mongoDb connection with MongoDb atlas
-const MONGO_URL = "mongodb+srv://Sayan67:iruqikmanded2@cluster0.it7p7iz.mongodb.net/YoutuberEditorCollab?retryWrites=true&w=majority"
-mongoose.connect(MONGO_URL).then(() => {
-
-}).then(console.log(`Connection successful.`));
-
+const app = express();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -46,12 +40,20 @@ app.use(express.static(client_path));
 app.set("views", client_path);
 app.set("view engine", "ejs");
 
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+})
+
+
+
 app.get("/home", (_, res) => {
   if (console.error()) {
     res.end("Error loading page.")
   }
   else { res.render('index', { user: null }); }
-
 });
 
 app.get("/home/:uid", async (req, res) => {
@@ -153,7 +155,7 @@ app.get("/", async (req, res) => {
 
 
 //multer library
-var Storage = multer.diskStorage({
+const diskStorage = multer.diskStorage({
   destination: function (req, file, callback) {
     callback(null, "./videos");
   },
@@ -161,10 +163,11 @@ var Storage = multer.diskStorage({
     callback(null, file.fieldname + "_" + Date.now() + "_" + file.originalname)
   },
 });
+const memStorage = multer.memoryStorage()
 
-var upload = multer({
-  storage: Storage,
-})
+const diskUpload = multer({ storage: diskStorage })
+const memUpload = multer({ storage: memStorage })
+
 
 app.get('/upload/:id', (req, res) => {
   const uid = req.params.id
@@ -175,11 +178,11 @@ app.get('/upload/:id', (req, res) => {
     })
 })
 
-app.post('/upload/:id', upload.single('video'), (req, res) => {
+app.post('/upload/:id', diskUpload.single('video'), (req, res) => {
   console.log(req.file)
-  title = req.body.title;
-  description = req.body.description;
-  tags = req.body.tags
+  const title = req.body.title;
+  const description = req.body.description;
+  const tags = req.body.tags
 
   const uid = req.params.id
 
@@ -242,49 +245,53 @@ app.post('/upload/:id', upload.single('video'), (req, res) => {
         res.status(500).send('Internal error\n' + err.err.toString())
       }
     })
+})
 
+app.post('/upload/cloudinary/:id', memUpload.single('video'), (req, res) => {
+  const { title, description } = req.body
+  console.log(title, description)
 })
 
 app.get('/profile/:id/txn/create', (req, res) => {
   const uid = req.params.id
   db.fetchUserData(uid)
     .then(user => {
-      res.render('create/transaction/index', {user})
+      res.render('create/transaction/index', { user })
     })
     .catch(err => res.redirect('404/usernotfound/' + uid))
 })
 
-app.post('/profile/:id/txn/create', upload.single('video'), (req, res) => {
-  const {path} = req.file
+app.post('/profile/:id/txn/create', diskUpload.single('video'), (req, res) => {
+  const { path } = req.file
   db.fetchUserData(req.params.id)
-  .then(user => {
-    const model = new VidModel({
-      path
-    })
-    model.save()
-      .then((doc) => {
-        new TransactionModel({
-          name: req.body.name,
-          description: req.body.description,
-          consumer: user._id,
-          consumer_vid: doc._id,
-        })
-        .save()
-        .then(doc => {
-          console.log(doc, user)
-          user.transactions
-            .push(doc._id)
-          
-          user.save()
-            .then(() => {
-              res.redirect(`/profile/${req.params.id}`)
-            })
-            .catch(err => res.status(500).send('1. failed ' + err.toString()))
-        })
-        .catch(err => res.status(500).send('2. failed ' + err.toString()))
+    .then(user => {
+      const model = new VidModel({
+        path
       })
-      .catch(err => res.status(500).send("3. failed " + err.toString()))
-  })
+      model.save()
+        .then((doc) => {
+          new TransactionModel({
+            name: req.body.name,
+            description: req.body.description,
+            consumer: user._id,
+            consumer_vid: doc._id,
+          })
+            .save()
+            .then(doc => {
+              console.log(doc, user)
+              user.transactions
+                .push(doc._id)
+
+              user.save()
+                .then(() => {
+                  res.redirect(`/profile/${req.params.id}`)
+                })
+                .catch(err => res.status(500).send('1. failed ' + err.toString()))
+            })
+            .catch(err => res.status(500).send('2. failed ' + err.toString()))
+        })
+        .catch(err => res.status(500).send("3. failed " + err.toString()))
+    })
 })
 
 app.get('404/usernotfound/:id', (req, res) => {
@@ -298,7 +305,7 @@ app.get('/profile/:id', (req, res) => {
   // Check if user is present 
   db.fetchPopulatedUserData(uid)
     .then(user => {
-      res.render('profile/profile', {user, transactions: user.transactions})
+      res.render('profile/profile', { user, transactions: user.transactions })
     })
     .catch(err => res.redirect(`404/usernotfound/${id}`));
 })
@@ -314,11 +321,18 @@ app.get('/search', (req, res) => {
 
 
 
-app.listen(port, () => {
-  if (console.error()) { console.log("Error in server.") }
-  else { console.log(`server runs perfectly on port ${port}`); }
+const port = process.env.PORT || 3000;
+mongoose.connect(process.env.MONGO_URL)
+  .then((conn) => {
+    console.log(`MongoDB connected: ${conn.connection.host}`)
+    app.listen(port, () => {
+      console.log(`server PORT: ${port}`);
+    })
+  })
+  .catch((err) => {
+    console.log(err)
+  })
 
-});
 
 module.exports = function (app) {
   console.log(app);
